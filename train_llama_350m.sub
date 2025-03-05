@@ -1,0 +1,13 @@
+executable = ./scripts/single_node/llama_350m.sh
+arguments = $(idx)
+error = ./log/test.$(Process).err
+output = ./log/test.$(Process).out
+log = ./log/test.$(Process).log
+request_memory = 600000
+request_disk = 200G
+request_cpus = 16
+request_gpus = 4
+requirements = TARGET.CUDACapability > 7.5 
+requirements = TARGET.CUDAGlobalMemoryMb  > 55000
+
+queue 1 idx from seq 0 3 |

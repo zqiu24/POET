@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import transformers
 
 
-def get_scheculer(
+def get_scheduler(
     optimizer,
     *,
     scheduler_type,
@@ -48,6 +48,11 @@ def get_scheculer(
             min_lr_ratio=min_lr_ratio,
             last_epoch=last_epoch,
             adjust_step=adjust_step,
+        )
+    if scheduler_type == "constant":
+        return transformers.get_constant_schedule(
+            optimizer,
+            last_epoch=last_epoch,
         )
 
     raise NotImplementedError(f"Scheduler {scheduler_type} is not implemented")

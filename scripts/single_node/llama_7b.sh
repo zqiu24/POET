@@ -1,3 +1,15 @@
+. /home/zqiu/anaconda3/etc/profile.d/conda.sh
+conda activate galore
+
+# Get the index argument
+idx=$1
+
+# If idx is not 0, exit
+if [ $idx -ne 0 ]; then
+    echo "Index $idx is not 0, exiting..."
+    exit 0
+fi
+
 # LLaMA-7B, 8-bit GaLore-Adam, single GPU
 # 22.72G, 0.37s/it
 torchrun --standalone --nproc_per_node 1 torchrun_main.py \

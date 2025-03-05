@@ -24,7 +24,10 @@ As a gradient projection method, GaLore is independent of the choice of optimize
 ### Install GaLore optimizer
 Install from pip:
 ```bash 
-pip install galore-torch
+conda create -n galore python=3.10 -y 
+pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121
+pip install -r exp_requirements.txt
+# pip uninstall galore-torch
 ```
 
 or if you want to install from source:

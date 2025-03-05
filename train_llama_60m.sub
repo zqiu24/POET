@@ -1,0 +1,13 @@
+executable = ./scripts/single_node/llama_60m.sh
+arguments = $(idx)
+error = ./log/test.$(Process).err
+output = ./log/test.$(Process).out
+log = ./log/test.$(Process).log
+request_memory = 600000
+request_disk = 200G
+request_cpus = 4
+request_gpus = 1
+requirements = TARGET.CUDACapability > 7.5 
+requirements = CUDADeviceName=="NVIDIA A100-SXM4-80GB"
+
+queue 1 idx from seq 0 3 |

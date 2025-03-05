@@ -199,13 +199,10 @@ class CayleyLinear(nn.Linear):
                             dtype=linear_layer.weight.dtype))
 
         # op = matmul(layout, BLOCK, MODE, trans_a=TRANS_A, trans_b=TRANS_B, device=device)
-        if self.rank > 10000:
+        if self.rank > 1:
             layout = torch.eye(self.rank).unsqueeze(0).to(torch.int64)
             self.op_left = matmul(layout, d_out, 'qoft_dsd', trans_a=False, trans_b=False, device=linear_layer.weight.device)
             self.op_right = matmul(layout, d_in, 'qoft_dds', trans_a=False, trans_b=False, device=linear_layer.weight.device)
-
-        self.use_neumann = False
-        self.reset_R = False
 
         # self.scale_init = 1.0  # Actual initial value you want
         # self.scale_scale = 1.0 / math.sqrt(self.out_features)  # Controls effective learning rate
@@ -221,83 +218,13 @@ class CayleyLinear(nn.Linear):
         
         # Initialize indices (will be updated periodically)
         # self.register_buffer('selected_indices', torch.arange(self.rank, device=linear_layer.weight.device))
+        self.steps_since_update = 0
+        self.update_indices_gap = 50
     
-    # def update_indices(self):
-    #     """Update the selected indices randomly."""
-    #     with torch.no_grad():
-    #         self.selected_indices = torch.randperm(self.in_features, device=self.weight.device)[:self.rank]
-
-    def get_cayley_transform_neumann(self, mode='all', num_terms=5):
-        """
-        Get Cayley transform matrices based on specified mode using Neumann series.
-        Args:
-            mode (str): One of 'all', 'left', or 'right' to specify which transforms to compute
-            num_terms (int): Number of terms to use in the Neumann series expansion (default: 5)
-        Returns:
-            Tuple of (R_left, R_right) where each R is a batch of smaller orthogonal matrices
-            R_left shape: [d_out, rank, rank] where d_out = out_features // rank
-            R_right shape: [d_in, rank, rank] where d_in = in_features // rank
-        """
-        R_left = None
-        R_right = None
-        
-        # Process left transform if needed
-        if mode in ['all', 'left']:
-            d = self.out_features // self.rank
-            
-            # Create batch of skew-symmetric matrices in original dtype
-            Q_blocks = torch.zeros(self.rank, d, d, 
-                                device=self.Q_left.device, 
-                                dtype=self.Q_left.dtype)
-            triu_indices = torch.triu_indices(d, d, offset=1)
-            Q_blocks[:, triu_indices[0], triu_indices[1]] = self.Q_left
-            Q_blocks = Q_blocks - Q_blocks.transpose(-2, -1)
-            
-            # Compute Cayley transform using Neumann series approximation
-            I = torch.eye(d, device=self.Q_left.device, dtype=self.Q_left.dtype)
-            
-            # Initialize the result with identity
-            R_left = I.clone().expand(self.rank, d, d)
-            
-            # Compute the series expansion up to the specified number of terms
-            Q_power = Q_blocks.clone()  # Start with Q^1
-            coeff = 2.0  # Coefficient for the first term (Q^1)
-            
-            for i in range(1, num_terms):
-                R_left = R_left + coeff * Q_power
-                
-                if i < num_terms - 1:  # Prepare next term if needed
-                    Q_power = torch.matmul(Q_power, Q_blocks)  # Compute next power Q^(i+1)
-        
-        # Process right transform if needed
-        if mode in ['all', 'right']:
-            d = self.in_features // self.rank
-            
-            # Create batch of skew-symmetric matrices in original dtype
-            Q_blocks = torch.zeros(self.rank, d, d,
-                                device=self.Q_right.device,
-                                dtype=self.Q_right.dtype)
-            triu_indices = torch.triu_indices(d, d, offset=1)
-            Q_blocks[:, triu_indices[0], triu_indices[1]] = self.Q_right
-            Q_blocks = Q_blocks - Q_blocks.transpose(-2, -1)
-            
-            # Compute Cayley transform using Neumann series approximation
-            I = torch.eye(d, device=self.Q_right.device, dtype=self.Q_right.dtype)
-            
-            # Initialize the result with identity
-            R_right = I.clone().expand(self.rank, d, d)
-            
-            # Compute the series expansion up to the specified number of terms
-            Q_power = Q_blocks.clone()  # Start with Q^1
-            coeff = 2.0  # Coefficient for the first term (Q^1)
-            
-            for i in range(1, num_terms):
-                R_right = R_right + coeff * Q_power
-                
-                if i < num_terms - 1:  # Prepare next term if needed
-                    Q_power = torch.matmul(Q_power, Q_blocks)  # Compute next power Q^(i+1)
-
-        return R_left, R_right
+    def update_indices(self):
+        """Update the selected indices randomly."""
+        with torch.no_grad():
+            self.selected_indices = torch.randperm(self.in_features, device=self.weight.device)[:self.rank]
     
     
     def get_cayley_transform(self, mode='all'):
@@ -350,44 +277,41 @@ class CayleyLinear(nn.Linear):
             R_right = R_right.to(self.Q_right.dtype)
 
         return R_left, R_right
-
+    
 
     def forward(self, x):
+        '''
         # First use the current R to update layer_weight
-        if self.reset_R:
+        if hasattr(self, 'update_indices_gap') and self.steps_since_update % self.update_indices_gap == (self.update_indices_gap - 1):
             with torch.no_grad():
-                if self.use_neumann:
-                    R_left, R_right = self.get_cayley_transform_neumann()
-                else:
-                    R_left, R_right = self.get_cayley_transform()
-                transformed_weight = self.weight.to(R_left.dtype)  # Match dtype
-                R_left_bs = torch.block_diag(*R_left)
-                R_right_bs = torch.block_diag(*R_right)
-                temp = transformed_weight @ R_right_bs
-                transformed_weight = R_left_bs @ temp
-                self.weight.data = transformed_weight.to(self.weight.dtype) 
+                R = self.get_cayley_transform()
+                selected_weights = self.weight[:, self.selected_indices].to(R.dtype)  # Match dtype
+                transformed_selected = torch.matmul(R, selected_weights.t()) # * self.s
+                self.weight.data[:, self.selected_indices] = transformed_selected.t().to(self.weight.dtype) 
 
+                self.update_indices()
                 self.steps_since_update = 0
-                self.Q_left.zero_()
-                self.Q_right.zero_()
+                self.Q.zero_()
+                self.s.data.fill_(1.0)
 
-                # breakpoint() # Match dtype when updating
+            # breakpoint() # Match dtype when updating
+        '''
+        # Determine whether to use left or right transform based on step count
+        # use_left = (self.steps_since_update // self.update_indices_gap) % 2 == 0 
+
+        # Get orthogonal matrix R through Cayley transform
+        # R_left, R_right = self.get_cayley_transform(mode='left' if use_left else 'right')
+        R_left, R_right = self.get_cayley_transform()
 
         # Create a copy of the weight matrix on the correct device and dtype
         transformed_weight = self.weight.to(dtype=x.dtype, device=x.device)
-
-        # Get orthogonal matrix R through Cayley transform
-        if self.use_neumann:
-            R_left, R_right = self.get_cayley_transform_neumann()
-        else:
-            R_left, R_right = self.get_cayley_transform()
         
         # Two-step matrix multiplication
         R_left_bs = torch.block_diag(*R_left)
         R_right_bs = torch.block_diag(*R_right)
         temp = transformed_weight @ R_right_bs
         transformed_weight = R_left_bs @ temp
-
+        
         # if self.rank == 1:
         # temp = transformed_weight @ R_right.squeeze()
         # transformed_weight = R_left.squeeze() @ temp
@@ -404,6 +328,8 @@ class CayleyLinear(nn.Linear):
         # selected_weights = self.weight[:, self.selected_indices].to(R.dtype)  # Match dtype
         # transformed_selected = torch.matmul(R, selected_weights.t()) * self.s
         # self.weight.data[:, self.selected_indices] = transformed_selected.t().to(self.weight.dtype) 
+
+        self.steps_since_update += 1
 
         # Regular linear transformation with transformed weight
         return F.linear(x, transformed_weight.squeeze(), self.bias)
@@ -539,9 +465,9 @@ def parse_args(args):
 
     # SOFT parameters
     parser.add_argument("--soft_rank", type=int, default=128)
+    parser.add_argument("--update_indices_gap", type=int, default=5)
     parser.add_argument("--soft_scale", type=float, default=1.0)
     parser.add_argument("--soft_proj_type", type=str, default="std")
-    parser.add_argument("--reset_R", default=False, action="store_true")
     
     # disable ddp, single_gpu
     parser.add_argument("--single_gpu", default=False, action="store_true")
@@ -632,7 +558,7 @@ def main(args):
             
     # initialize wandb without config (it is passed later)
     if global_rank == 0:
-        wandb.init(project="soft-c4-neumann-reset_R", name=args.save_dir.split('/')[-1])
+        wandb.init(project="soft-c4", name=args.save_dir.split('/')[-1])
         
     logger.info(f"Using dist with rank {global_rank} (only rank 0 will log)")
     logger.info("*" * 40)
@@ -813,9 +739,8 @@ def main(args):
             parent_name, child_name = module_name.rsplit(".", 1)
             parent_module = model.get_submodule(parent_name)
             new_layer = CayleyLinear(module, rank=args.soft_rank)
-            new_layer.reset_R = args.reset_R
-            if "neumann" in args.optimizer.lower():
-                new_layer.use_neumann = True
+            # Set update_indices_gap
+            new_layer.update_indices_gap = args.update_indices_gap
             setattr(parent_module, child_name, new_layer)
 
             # Add Q parameter to soft_params
@@ -832,8 +757,8 @@ def main(args):
         regular_params = [p for p in model.parameters() if id(p) not in id_soft_params]
         # Create parameter groups for optimizer
         param_groups = [
-            # {'params': regular_params, 'lr': 0.01},
-            {'params': soft_params, 'lr': args.lr, 'soft_rank': args.soft_rank},
+            # {'params': regular_params, 'lr': args.lr * 10},
+            {'params': soft_params, 'lr': args.lr, 'soft_rank': args.soft_rank},  # Could use different lr for Q
         ]
 
         # num_regular_params = 0
@@ -862,9 +787,14 @@ def main(args):
     elif args.optimizer.lower() == "galore_adamw" or args.optimizer.lower() == "only_galore" or args.optimizer.lower() == "no_galore":
         # redefine way to call galore_adamw
         optimizer = GaLoreAdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
-    elif args.optimizer.lower() == "soft_adamw" or args.optimizer.lower() == "soft_adamw_neumann" or args.optimizer.lower() == "only_soft" or args.optimizer.lower() == "no_soft":
+    elif args.optimizer.lower() == "soft_adamw" or args.optimizer.lower() == "only_soft" or args.optimizer.lower() == "no_soft":
         # redefine way to call soft_adamw
+        # optimizer = torch.optim.AdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+        # optimizer = torch.optim.SGD(param_groups, lr=args.lr, momentum=args.beta1, weight_decay=args.weight_decay)
         optimizer = torch.optim.AdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+        # optimizer = SOFTAdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+        # optimizer = SOFTCayleyAdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+        # optimizer = SOFTCayleyAdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
     # implement sgd
     elif args.optimizer.lower() == "sgd":
         optimizer = torch.optim.SGD(trainable_params, lr=args.lr, weight_decay=args.weight_decay, momentum=args.beta1)
@@ -1025,6 +955,32 @@ def main(args):
         # if args.grad_clipping != 0.0: torch.nn.utils.clip_grad_norm_(trainable_params, args.grad_clipping)
 
         '''
+        # The below code is only executed during the update step
+        if global_rank == 0:
+            metrics = {}
+            
+            # Collect statistics for all CayleyLinear layers
+            for i, (name, module) in enumerate(model.named_modules()):
+                if isinstance(module, CayleyLinear):
+                    with torch.no_grad():
+                        layer_name = f"layer_{i}"
+                        
+                        # Scale statistics
+                        metrics[f'scale_norm/{layer_name}'] = torch.norm(module.scale).item()
+                        metrics[f'scale_mean/{layer_name}'] = torch.mean(module.scale).item()
+                        
+                        # Scale gradient statistics if available
+                        if module.scale.grad is not None:
+                            metrics[f'scale_grad_norm/{layer_name}'] = torch.norm(module.scale.grad).item()
+                            metrics[f'scale_grad_mean/{layer_name}'] = torch.mean(torch.abs(module.scale.grad)).item()
+
+            # Add update step
+            metrics['update_step'] = update_step
+            
+            # Log to wandb
+            wandb.log(metrics, step=global_step)
+
+
         # Gradient inspection
         if global_rank == 0:
             metrics = {}
@@ -1032,41 +988,73 @@ def main(args):
             # Collect statistics for all Q parameters and regular weights
             for i, (name, module) in enumerate(model.named_modules()):
                 if isinstance(module, CayleyLinear):
-                    if module.Q_left.grad is not None and module.Q_right.grad is not None:
+                    if module.Q.grad is not None:
                         layer_name = f"layer_{i}"
                         
                         # Gradient statistics
-                        metrics[f'Q_left_grad_norm/{layer_name}'] = torch.norm(module.Q_left.grad).item()
-                        metrics[f'Q_left_grad_mean/{layer_name}'] = torch.mean(torch.abs(module.Q_left.grad)).item()
-                        metrics[f'Q_right_grad_norm/{layer_name}'] = torch.norm(module.Q_right.grad).item()
-                        metrics[f'Q_right_grad_mean/{layer_name}'] = torch.mean(torch.abs(module.Q_right.grad)).item()
+                        metrics[f'Q_grad_norm/{layer_name}'] = torch.norm(module.Q.grad).item()
+                        metrics[f'Q_grad_mean/{layer_name}'] = torch.mean(torch.abs(module.Q.grad)).item()
                         
                         # Check orthogonality
                         with torch.no_grad():
-                            R_left, R_right = module.get_cayley_transform_neumann()
-                            R_left_bs = torch.block_diag(*R_left)
-                            R_right_bs = torch.block_diag(*R_right)
-
-                            if len(R_left_bs.shape) != 2:
-                                breakpoint()
-                            if len(R_right_bs.shape) != 2:
-                                breakpoint()
-
-                            if R_left_bs.shape[0] != R_left_bs.shape[1]:
-                                breakpoint()
-                            if R_right_bs.shape[0] != R_right_bs.shape[1]:
-                                breakpoint()
-
-                            I = torch.eye(R_left_bs.shape[0], device=R_left_bs.device, dtype=R_left_bs.dtype)
-                            metrics[f'R_left_orthogonality_error/{layer_name}'] = torch.norm(R_left_bs.T @ R_left_bs - I).item()
-                            
-                            I = torch.eye(R_right_bs.shape[0], device=R_right_bs.device, dtype=R_right_bs.dtype)
-                            metrics[f'R_right_orthogonality_error/{layer_name}'] = torch.norm(R_right_bs.T @ R_right_bs - I).item()
+                            R = module.get_cayley_transform()
+                            I = torch.eye(module.rank, device=R.device, dtype=R.dtype)
+                            metrics[f'R_orthogonality_error/{layer_name}'] = torch.norm(R.T @ R - I).item()
+                
+                elif isinstance(module, nn.Linear):
+                    if module.weight.grad is not None:
+                        layer_name = f"layer_{i}"
+                        
+                        # Weight gradient statistics
+                        metrics[f'W_grad_norm/{layer_name}'] = torch.norm(module.weight.grad).item()
+                        metrics[f'W_grad_mean/{layer_name}'] = torch.mean(torch.abs(module.weight.grad)).item()
+                        
+                        # Weight norm
+                        with torch.no_grad():
+                            metrics[f'W_norm/{layer_name}'] = torch.norm(module.weight).item()
 
             # Add update step
             metrics['update_step'] = update_step
             
             # Log to wandb
+            wandb.log(metrics, step=global_step)
+
+        # Calculate and log spectral norms
+        if global_rank == 0:
+            metrics = {}
+            
+            # Collect gradient spectral norms for all linear layers
+            for name, module in model.named_modules():
+                if isinstance(module, (nn.Linear, CayleyLinear)):
+                    if hasattr(module, 'weight') and module.weight.grad is not None:
+                        # Calculate spectral norm using torch.linalg.svdvals
+                        with torch.no_grad():
+                            grad = module.weight.grad
+                            if isinstance(module, CayleyLinear):
+                                # For CayleyLinear, we need to handle the gradient differently
+                                transformed_grad = grad.clone()
+                                R = module.get_cayley_transform()
+                                transformed_grad[:, module.selected_indices] = transformed_grad[:, module.selected_indices] @ R
+                                grad = transformed_grad * (1.0 + module.scale)
+                            
+                            # Cast to float32 for SVD computation
+                            grad_float32 = grad.to(torch.float32)
+                            
+                            # Calculate spectral norm (largest singular value)
+                            s = torch.linalg.svdvals(grad_float32)
+                            spectral_norm = s[0].item()
+                            
+                            # Log spectral norm
+                            metrics[f'grad_spectral_norm/{name}'] = spectral_norm
+                            
+                            # Also log Frobenius norm for comparison
+                            frob_norm = torch.norm(grad_float32).item()
+                            metrics[f'grad_frobenius_norm/{name}'] = frob_norm
+                            
+                            # Log ratio of spectral to Frobenius norm
+                            metrics[f'grad_norm_ratio/{name}'] = spectral_norm / frob_norm if frob_norm > 0 else 0
+
+            # Add these metrics to the existing wandb log
             wandb.log(metrics, step=global_step)
         '''
 
