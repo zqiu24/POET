@@ -7,3 +7,4 @@ from .soft import SOFTModel
 # from .soft_iterative import SOFTModel
 from .stiefel_optimizer import AdamG as CayleyAdam
 from .matmul_qoft import matmul
+from .test_skewsymmetric import SkewSymmetric

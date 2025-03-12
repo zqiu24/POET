@@ -33,10 +33,6 @@ class AdamW(Optimizer):
             Whether or not to correct bias in Adam (for instance, in Bert TF repository they use `False`).
         no_deprecation_warning (`bool`, *optional*, defaults to `False`):
             A flag used to disable the deprecation warning (set to `True` to disable the warning).
-        use_orthogonal (`bool`, *optional*, defaults to `False`):
-            Whether to use orthogonal/spectral-preserving training.
-        cayley_lr_factor (`float`, *optional*, defaults to 1.0):
-            Learning rate factor for Cayley transform updates.
     """
 
     def __init__(
@@ -48,8 +44,6 @@ class AdamW(Optimizer):
         weight_decay: float = 0.0,
         correct_bias: bool = True,
         no_deprecation_warning: bool = False,
-        use_orthogonal: bool = False,
-        cayley_lr_factor: float = 1.0,
     ):
         if not no_deprecation_warning:
             warnings.warn(
@@ -67,36 +61,8 @@ class AdamW(Optimizer):
             raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {
-            "lr": lr, 
-            "betas": betas, 
-            "eps": eps, 
-            "weight_decay": weight_decay, 
-            "correct_bias": correct_bias,
-            "use_orthogonal": use_orthogonal,
-            "cayley_lr_factor": cayley_lr_factor,
-        }
+        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
         super().__init__(params, defaults)
-
-    def _get_skew_symmetric_from_vector(self, q_vector, shape):
-        """Convert a vector representation to a skew-symmetric matrix."""
-        n, m = shape
-        A = torch.zeros((n, n), device=q_vector.device, dtype=q_vector.dtype)
-        # Fill upper triangular part
-        idx = 0
-        for i in range(n):
-            for j in range(i+1, n):
-                A[i, j] = q_vector[idx]
-                A[j, i] = -q_vector[idx]  # Skew-symmetric property
-                idx += 1
-        return A
-    
-    def _cayley_transform(self, A):
-        """Apply Cayley transform to get orthogonal matrix from skew-symmetric matrix."""
-        n = A.size(0)
-        I = torch.eye(n, device=A.device, dtype=A.dtype)
-        # R = (I + A) @ (I - A).inverse()
-        return torch.matmul(I + A, torch.inverse(I - A))
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -126,65 +92,6 @@ class AdamW(Optimizer):
                 if 'dim' not in group:
                     group['dim'] = 2
                     
-                # Orthogonal transformation setup
-                if group.get("use_orthogonal", False) and len(p.shape) >= 2:
-                    n, m = p.shape[0], p.shape[1]
-                    
-                    # Initialize orthogonal transform parameters if not present
-                    if "q_left" not in state:
-                        # Vector representation of skew-symmetric matrix (upper triangular part)
-                        state["q_left"] = torch.zeros(n * (n - 1) // 2, device=p.device, dtype=p.dtype)
-                        state["q_right"] = torch.zeros(m * (m - 1) // 2, device=p.device, dtype=p.dtype)
-                        
-                        # Save initial normalized weights
-                        with torch.no_grad():
-                            # Normalize initial weights
-                            state["W_init"] = p.data.clone()
-                            norm = torch.norm(state["W_init"])
-                            if norm > 0:
-                                state["W_init"].div_(norm)
-                    
-                    # Get gradient for q vectors instead of direct weight update
-                    if "exp_avg_q_left" not in state:
-                        state["exp_avg_q_left"] = torch.zeros_like(state["q_left"])
-                        state["exp_avg_sq_q_left"] = torch.zeros_like(state["q_left"])
-                        state["exp_avg_q_right"] = torch.zeros_like(state["q_right"])
-                        state["exp_avg_sq_q_right"] = torch.zeros_like(state["q_right"])
-                    
-                    # We need to compute gradients for q_left and q_right instead of directly for W
-                    # This is a simplification - in a real implementation you'd need to work out 
-                    # the proper gradient computation through the Cayley transform
-                    
-                    # For now, let's use a simple approximation to update q vectors
-                    # In practice, you would need to compute the exact gradients
-                    
-                    # Update q vectors using Adam
-                    beta1, beta2 = group["betas"]
-                    lr_cayley = group["lr"] * group["cayley_lr_factor"]
-                    
-                    # This would be where you compute the actual gradients for q_left and q_right
-                    # based on the gradient of the weight matrix
-                    # For now, we'll use a placeholder approximation
-                    
-                    # Update q_left and q_right
-                    # ... code to update q vectors with Adam ...
-                    
-                    # Apply Cayley transform to get orthogonal matrices
-                    A_left = self._get_skew_symmetric_from_vector(state["q_left"], (n, n))
-                    A_right = self._get_skew_symmetric_from_vector(state["q_right"], (m, m))
-                    
-                    R_left = self._cayley_transform(A_left)
-                    R_right = self._cayley_transform(A_right)
-                    
-                    # Update the weights using orthogonal transformations
-                    with torch.no_grad():
-                        # W = R_left @ W_init @ R_right
-                        new_weights = torch.matmul(R_left, torch.matmul(state["W_init"], R_right))
-                        p.data.copy_(new_weights)
-                    
-                    # Skip the normal Adam update for this parameter
-                    continue
-                
                 # GaLore Projection
                 if "rank" in group:
                     if "projector" not in state:

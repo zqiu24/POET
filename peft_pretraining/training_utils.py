@@ -29,11 +29,10 @@ def get_scheduler(
             last_epoch=last_epoch,
         )
     if scheduler_type == "cosine":
-        return get_cyclical_cosine_schedule_with_min_lr(
+        return get_cosine_schedule_with_min_lr(
             optimizer,
             num_warmup_steps=warmup_steps,
             num_training_steps=num_training_steps,
-            cycle_length=cycle_length,
             min_lr_ratio=min_lr_ratio,
             last_epoch=last_epoch,
         )
@@ -130,11 +129,39 @@ def magnitude_pruning(tensor, prune_ratio):
     return tensor
 
 
+def get_cosine_schedule_with_min_lr(optimizer, num_warmup_steps, num_training_steps, min_lr_ratio=0.1, last_epoch=-1):
+    """Standard cosine learning rate schedule with warmup and minimum learning rate."""
+    lr_lambda = partial(
+        _get_cosine_schedule_with_min_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        min_lr_ratio=min_lr_ratio,
+    )
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
+
+
+def _get_cosine_schedule_with_min_lr_lambda(current_step, *, num_warmup_steps, num_training_steps, min_lr_ratio):
+    assert 0 < min_lr_ratio <= 1.0, "min_lr_ratio must be in (0,1]"
+
+    if current_step < num_warmup_steps:
+        return float(current_step) / float(max(1, num_warmup_steps))
+
+    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+    cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+    
+    return min_lr_ratio + (1.0 - min_lr_ratio) * cosine_decay
+
+
 def _get_cyclical_cosine_schedule_with_min_lr_lambda(current_step, *, num_warmup_steps, cycle_length, min_lr_ratio):
     assert 0 < min_lr_ratio <= 1.0, "min_lr_ratio must be in (0,1]"
 
     # compute where we are in the current cycle
     cycle_step = current_step % cycle_length
+
+    # Special case: start of a new cycle (except the first one)
+    # This ensures continuity with the end of the previous cycle
+    if cycle_step == 0 and current_step > 0:
+        return min_lr_ratio
 
     if cycle_step < num_warmup_steps:
         if current_step != cycle_step:

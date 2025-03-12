@@ -2,3 +2,5 @@ torch
 transformers==4.31.0
 bitsandbytes
 tensorly
+huggingface-hub==0.24.2
+datasets==2.14.6
