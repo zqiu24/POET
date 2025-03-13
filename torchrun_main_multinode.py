@@ -1551,6 +1551,111 @@ def parse_args(args):
 
 
 @torch.no_grad()
+def evaluate_model_single_node(model, preprocess_batched, pad_idx, global_rank, local_rank, local_world_size, device, batch_size, args):
+    """
+    Run evaluation on a single node using multiple GPUs.
+    Only processes on the first node will participate in evaluation.
+    
+    Args:
+        model: The model to evaluate
+        preprocess_batched: Function to preprocess batches
+        pad_idx: Padding token index
+        global_rank: Global rank of the current process
+        local_rank: Local rank within the current node
+        local_world_size: Number of processes on the current node
+        device: Device to run evaluation on
+        batch_size: Batch size for evaluation
+        args: Command line arguments
+    """
+    # Check if this process is on the primary node
+    is_primary_node = (global_rank < local_world_size)
+    
+    # Create a barrier to synchronize all processes
+    torch.distributed.barrier()
+    
+    if not is_primary_node:
+        # Secondary nodes just wait and return
+        return None
+    
+    _time = time.time()
+    # Val data loading with explicit cache disabling
+    val_data = load_local_data(split='validation', seed=42)
+    logger.info(f"Loaded validation dataset in {time.time() - _time:.2f} seconds")
+    
+    # Split the dataset among GPUs on this node only
+    val_data = datasets.distributed.split_dataset_by_node(val_data, rank=local_rank, world_size=local_world_size)
+    
+    val_data_mapped = val_data.map(
+        preprocess_batched,
+        batched=True,
+        remove_columns=["text", "timestamp", "url"],
+        num_proc=16,
+        load_from_cache_file=True
+    )
+    
+    val_dataloader = DataLoader(
+        val_data_mapped,
+        batch_size=batch_size,
+        shuffle=False,
+        pin_memory=True
+    )
+    
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    
+    # Create a process group for the first node
+    first_node_ranks = list(range(local_world_size))
+    first_node_group = torch.distributed.new_group(ranks=first_node_ranks)
+    
+    for batch in val_dataloader:
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+        
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels
+        )
+        
+        loss = outputs.loss
+        
+        # Count non-padding tokens
+        non_pad_mask = (labels != pad_idx)
+        num_tokens = non_pad_mask.sum().item()
+        
+        # Accumulate loss (weighted by number of tokens)
+        total_loss += loss.item() * num_tokens
+        total_tokens += num_tokens
+    
+    # Gather results from all GPUs on this node
+    loss_tensor = torch.tensor([total_loss], device=device)
+    tokens_tensor = torch.tensor([total_tokens], device=device)
+    
+    # All-reduce within the first node group
+    torch.distributed.all_reduce(loss_tensor, op=torch.distributed.ReduceOp.SUM, group=first_node_group)
+    torch.distributed.all_reduce(tokens_tensor, op=torch.distributed.ReduceOp.SUM, group=first_node_group)
+    
+    # Calculate metrics
+    if tokens_tensor.item() > 0:
+        avg_loss = loss_tensor.item() / tokens_tensor.item()
+        perplexity = math.exp(avg_loss)
+    else:
+        avg_loss = float('inf')
+        perplexity = float('inf')
+    
+    # Only local rank 0 logs results
+    if local_rank == 0:
+        logger.info(f"Eval loss at step {CayleyLinear.global_step_counter}: {avg_loss}, perplexity: {perplexity:.2f}")
+    
+    # Create a barrier to synchronize all processes before returning
+    torch.distributed.barrier()
+    
+    return avg_loss, perplexity
+
+
+@torch.no_grad()
 def evaluate_model(model, preprocess_batched, pad_idx, global_rank, world_size, device, batch_size):
     _time = time.time()
     # Val data loading with explicit cache disabling
@@ -2214,14 +2319,34 @@ def main(args):
         # evaluation
         if update_step % args.eval_every == 0:
             logger.info(f"Performing evaluation at step {update_step}")
+            logger.info(f"Starting evaluation on single node (global rank: {global_rank})")
+        
+            # Temporarily increase NCCL timeout for evaluation
+            original_timeout = os.environ.get("NCCL_TIMEOUT_MS", "600000")
+            os.environ["NCCL_TIMEOUT_MS"] = "1200000"  # 20 minutes
+            '''
             total_loss, perplexity, evaluated_on_tokens = evaluate_model(
                 model, preprocess_batched, pad_idx, global_rank, world_size, device, args.batch_size
             )
+            '''
+            local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
+            total_loss, perplexity = evaluate_model_single_node(
+                model=model,
+                preprocess_batched=preprocess_batched,
+                pad_idx=pad_idx,
+                global_rank=global_rank,
+                local_rank=local_rank,
+                local_world_size=local_world_size,
+                device=device,
+                batch_size=args.eval_batch_size,
+                args=args
+            )
+            
             if global_rank == 0:
                 wandb.log({
                     "final_eval_loss": total_loss,
                     "final_eval_perplexity": perplexity,
-                    "final_eval_tokens": evaluated_on_tokens,
+                    # "final_eval_tokens": evaluated_on_tokens,
                     },
                     step=global_step,
                 )

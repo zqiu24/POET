@@ -11,11 +11,15 @@ def check_args_torchrun_main(args):
         n_gpus = int(os.environ.get('WORLD_SIZE', 1))  # get number of GPUs from torchrun
         if "soft" in args.optimizer:
             if args.reset_R:
-                args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-reset_R-{args.lr}lr-{args.num_training_steps}steps-{args.soft_rank}rank-{args.weight_decay}wd-{args.warmup_steps}warmup-{n_gpus}gpu-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+                if args.stochastic:
+                    args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-reset_R-stochastic-{args.update_reset_R_gap}update_reset_R_gap-{args.lr}lr-{args.soft_lr}soft_lr-{args.min_lr_ratio}min_lr_ratio-{args.soft_num_neumann_terms}neumann_terms-{args.num_training_steps}steps-{args.warmup_steps}warmup-{args.soft_rank}rank-{args.grad_clipping}grad_clipping-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+                else:
+                    args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-reset_R-{args.update_reset_R_gap}update_reset_R_gap-{args.lr}lr-{args.soft_lr}soft_lr-{args.soft_num_neumann_terms}neumann_terms-{args.num_training_steps}steps-{args.warmup_steps}warmup-{args.soft_rank}rank-{args.grad_clipping}grad_clipping-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+
             else:
-                args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-{args.lr}lr-{args.num_training_steps}steps-{args.soft_rank}rank-{args.weight_decay}wd-{args.warmup_steps}warmup-{n_gpus}gpu-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+                args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-{args.lr}lr-{args.soft_lr}soft_lr-{args.soft_num_neumann_terms}neumann_terms-{args.num_training_steps}steps-{args.warmup_steps}warmup-{args.soft_rank}rank-{args.grad_clipping}grad_clipping-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         else:
-            args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-{args.lr}lr-{args.num_training_steps}steps-{args.weight_decay}wd-{args.warmup_steps}warmup-{n_gpus}gpu-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+            args.save_dir = f"checkpoints/{args.model_config.split('/')[-1].rstrip('.json')}-{args.optimizer}-{args.lr}lr-{args.num_training_steps}steps-{args.warmup_steps}warmup-{args.grad_clipping}grad_clipping-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
     if args.tags is not None:
         args.tags = args.tags.split(",")

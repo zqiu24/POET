@@ -14,16 +14,18 @@ if [ $idx -eq 0 ]; then
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 1 ]; then
     optimizer="galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 2 ]; then
     optimizer="soft_adamw_neumann"
-    lr=0.01
-    soft_rank=2
+    lr=0.005
+    soft_rank=4
     # Set soft_lr and update_reset_R_gap based on soft_rank
     if [ $soft_rank -eq 4 ]; then
         soft_lr_values=(0.002)
@@ -32,18 +34,21 @@ elif [ $idx -eq 2 ]; then
         soft_lr_values=(0.001)
         update_reset_R_gap=200
     fi
+    min_lr_ratio=0.01
 elif [ $idx -eq 3 ]; then
     optimizer="only_adamw"
     lr=0.0005 # 0.01, 0.005, 0.001, 0.0005, 0.0001
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 4 ]; then
     optimizer="only_galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 5 ]; then
     optimizer="only_soft_adamw_neumann"
     lr=0.01
@@ -56,6 +61,7 @@ elif [ $idx -eq 5 ]; then
         soft_lr_values=(0.001)
         update_reset_R_gap=200
     fi
+    min_lr_ratio=0.01
 fi
 
 # Loop through each training steps value
@@ -70,7 +76,13 @@ for soft_lr in "${soft_lr_values[@]}"; do
     fi
 
     # LLaMA-1B, GaLore-Adam, 8 A100, 1 Node
-    torchrun --standalone --nproc_per_node 8 torchrun_main.py \
+    torchrun \
+        --nnodes=4 \
+        --nproc_per_node=8 \
+        --node_rank=2 \
+        --master_addr=172.22.8.9 \
+        --master_port=29500 \
+        torchrun_main.py \
         --wandb_project $wandb_project \
         --model_config configs/llama_1b.json \
         --lr $lr \
@@ -81,15 +93,15 @@ for soft_lr in "${soft_lr_values[@]}"; do
         --soft_num_neumann_terms 5 \
         --update_proj_gap 200 \
         --update_reset_R_gap $update_reset_R_gap \
-        --batch_size 32 \
+        --batch_size 16 \
         --total_batch_size 512 \
-        --num_training_steps 200000 \
+        --num_training_steps 100000 \
         --warmup_steps 0 \
-        --min_lr_ratio 0.1 \
+        --min_lr_ratio $min_lr_ratio \
         --weight_decay 0 \
-        --grad_clipping 0.05 \
+        --grad_clipping 0.01 \
         --dtype bfloat16 \
-        --eval_every 2000 \
+        --eval_every 1000 \
         --save_every 100000000 \
         --optimizer $optimizer \
         --reset_R \
