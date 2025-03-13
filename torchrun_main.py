@@ -719,7 +719,11 @@ class CayleyLinear(nn.Linear):
         if self.reset_R and self.update_reset_R_gap > 0 and \
            CayleyLinear.global_step_counter % self.update_reset_R_gap == 0 and \
            CayleyLinear.global_step_counter > 0:
+<<<<<<< HEAD
             # print(f"Resetting R at global step {CayleyLinear.global_step_counter}")
+=======
+            print(f"Resetting R at global step {CayleyLinear.global_step_counter}")
+>>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
             self.merge_and_reset_R()
 
         # Get transforms - will use cached values if parameters haven't changed
@@ -1448,7 +1452,7 @@ def load_local_data(split='train', max_samples=None, seed=42):
                 streaming=False,
                 cache_dir=cache_dir,               # Explicitly disable cache
                 # keep_in_memory=True,       # Keep everything in memory
-                num_proc=16,
+                num_proc=32,
                 download_config=DownloadConfig(cache_dir=None, force_download=True)  # Additional cache disabling
             )
             
@@ -1560,6 +1564,7 @@ def evaluate_model(model, preprocess_batched, pad_idx, global_rank, world_size, 
     if not args.single_gpu:
         val_data = datasets.distributed.split_dataset_by_node(val_data, rank=global_rank, world_size=world_size)
 
+    # Create a non-caching version of preprocessing
     val_data_mapped = val_data.map(
         preprocess_batched,
         batched=True,
