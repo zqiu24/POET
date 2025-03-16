@@ -1,5 +1,5 @@
 # LLaMA-130M, GaLore-Adam, 1 A100, 1 Node
-torchrun --standalone --nproc_per_node 1 torchrun_main.py \
+torchrun --standalone --nproc_per_node 1 torchrun_main_paper.py \
     --model_config configs/llama_130m.json \
     --lr 0.01 \
     --galore_scale 0.25 \

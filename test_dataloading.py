@@ -23,7 +23,7 @@ def load_local_data(split='train', max_samples=None, seed=42):
         'url': Value('string')
     })
     
-    data_dir = "/lustre/fast/fast/zqiu/GaLore/c4/en"
+    data_dir = "./c4/en"
     import glob
     
     # Get all available files

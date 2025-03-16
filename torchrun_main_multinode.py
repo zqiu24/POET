@@ -1487,8 +1487,8 @@ def load_local_data(split='train', max_samples=None, seed=42):
 
 
 def parse_args(args):
-    parser = argparse.ArgumentParser()
-
+    parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
+    
     parser.add_argument("--model_config", type=str, required=True)
     parser.add_argument("--use_hf_model", default=False, action="store_true")
     parser.add_argument("--continue_from", type=str, default=None)
@@ -1544,9 +1544,47 @@ def parse_args(args):
     #wandb
     parser.add_argument("--wandb_project", type=str, default="soft-c4")
     
+    # Add max_training_samples argument
+    parser.add_argument(
+        "--max_training_samples",
+        type=int,
+        default=None,
+        help="Maximum number of training samples to process. If specified, overrides max_train_steps.",
+    )
+    
+    # Keep the existing max_train_steps for backward compatibility
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=None,
+        help="Total number of training steps to perform. If specified and max_training_samples is not set, overrides num_train_epochs.",
+    )
+    
+    # Modify per_device_train_batch_size help text to clarify it's the only batch size parameter
+    parser.add_argument(
+        "--per_device_train_batch_size",
+        type=int,
+        default=8,
+        help="Batch size per GPU/TPU core/CPU for training. The global batch size will be this value times the number of processes.",
+    )
+    
+    # Remove or deprecate total_batch_size if it exists
+    # parser.add_argument(
+    #     "--total_batch_size",
+    #     type=int,
+    #     default=None,
+    #     help="DEPRECATED: Please use per_device_train_batch_size instead.",
+    # )
+    
     args = parser.parse_args(args)
-
-    args = args_utils.check_args_torchrun_main(args)
+    
+    # Add warning if total_batch_size is used
+    if hasattr(args, 'total_batch_size') and args.total_batch_size is not None:
+        print("WARNING: --total_batch_size is deprecated. Using --per_device_train_batch_size instead.")
+        # Convert total_batch_size to per_device_train_batch_size if needed
+        if args.world_size > 0:  # Ensure we don't divide by zero
+            args.per_device_train_batch_size = args.total_batch_size // args.world_size
+        
     return args
 
 
@@ -1738,8 +1776,27 @@ def main(args):
         logger.info(f"{k:30} {v}")
     logger.info("*" * 40)
 
-    # Calculate how many samples we need based on training steps
-    samples_needed = args.num_training_steps * args.total_batch_size
+    # Calculate global batch size (across all processes)
+    global_batch_size = args.per_device_train_batch_size * args.world_size
+    
+    if global_rank == 0:
+        print(f"Global batch size: {global_batch_size} (per_device: {args.per_device_train_batch_size} × {args.world_size} processes)")
+    
+    # Calculate max_train_steps based on max_training_samples if provided
+    if args.max_training_samples is not None:
+        # Calculate steps needed to process the specified number of samples
+        args.max_train_steps = (args.max_training_samples + global_batch_size - 1) // global_batch_size
+        
+        if global_rank == 0:
+            print(f"Setting max_train_steps to {args.max_train_steps} based on {args.max_training_samples} samples "
+                  f"with global batch size {global_batch_size}")
+    
+    # Original code for calculating max_train_steps based on epochs
+    if args.max_train_steps is None:
+        args.max_train_steps = math.ceil(args.num_train_epochs * num_update_steps_per_epoch)
+    else:
+        args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    
     # Add some buffer (20%) to account for filtering, etc.
     samples_needed = int(samples_needed * 1.2)
     logger.info(f"Auto-calculated samples needed: {samples_needed} based on {args.num_training_steps} steps")
