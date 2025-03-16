@@ -6,6 +6,7 @@ export WANDB_API_KEY="254b491166b72b5f961613863d702748580bead9"
 # Get the index and GPU arguments
 idx=$1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+# export CUDA_VISIBLE_DEVICES=0,1,3,5
 
 # Choose optimizer based on idx
 if [ $idx -eq 0 ]; then
@@ -14,12 +15,14 @@ if [ $idx -eq 0 ]; then
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 1 ]; then
     optimizer="galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 2 ]; then
     optimizer="soft_adamw_neumann"
     lr=0.01
@@ -32,18 +35,21 @@ elif [ $idx -eq 2 ]; then
         soft_lr_values=(0.001)
         update_reset_R_gap=200
     fi
+    min_lr_ratio=0.01
 elif [ $idx -eq 3 ]; then
     optimizer="only_adamw"
     lr=0.0005 # 0.01, 0.005, 0.001, 0.0005, 0.0001
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 4 ]; then
     optimizer="only_galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
+    min_lr_ratio=0.1
 elif [ $idx -eq 5 ]; then
     optimizer="only_soft_adamw_neumann"
     lr=0.01
@@ -56,6 +62,7 @@ elif [ $idx -eq 5 ]; then
         soft_lr_values=(0.001)
         update_reset_R_gap=200
     fi
+    min_lr_ratio=0.01
 fi
 
 # Loop through each training steps value
@@ -81,13 +88,13 @@ for soft_lr in "${soft_lr_values[@]}"; do
         --soft_num_neumann_terms 5 \
         --update_proj_gap 200 \
         --update_reset_R_gap $update_reset_R_gap \
-        --batch_size 32 \
+        --batch_size 64 \
         --total_batch_size 512 \
-        --num_training_steps 200000 \
+        --num_training_steps 250000 \
         --warmup_steps 0 \
-        --min_lr_ratio 0.1 \
+        --min_lr_ratio $min_lr_ratio \
         --weight_decay 0 \
-        --grad_clipping 0.05 \
+        --grad_clipping 0.01 \
         --dtype bfloat16 \
         --eval_every 2000 \
         --save_every 100000000 \

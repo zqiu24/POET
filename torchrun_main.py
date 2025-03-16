@@ -719,11 +719,7 @@ class CayleyLinear(nn.Linear):
         if self.reset_R and self.update_reset_R_gap > 0 and \
            CayleyLinear.global_step_counter % self.update_reset_R_gap == 0 and \
            CayleyLinear.global_step_counter > 0:
-<<<<<<< HEAD
             # print(f"Resetting R at global step {CayleyLinear.global_step_counter}")
-=======
-            print(f"Resetting R at global step {CayleyLinear.global_step_counter}")
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
             self.merge_and_reset_R()
 
         # Get transforms - will use cached values if parameters haven't changed

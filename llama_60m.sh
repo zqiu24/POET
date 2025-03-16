@@ -97,7 +97,7 @@ for soft_lr in "${soft_lr_values[@]}"; do
         --update_reset_R_gap $update_reset_R_gap \
         --batch_size 256 \
         --total_batch_size 512 \
-        --num_training_steps 150000 \
+        --num_training_steps 100000 \
         --warmup_steps 0 \
         --min_lr_ratio $min_lr_ratio \
         --weight_decay 0.0 \

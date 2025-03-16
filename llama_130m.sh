@@ -33,29 +33,19 @@ if [ $idx -eq 0 ]; then
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
-<<<<<<< HEAD
     min_lr_ratio=0.1
-=======
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
 elif [ $idx -eq 1 ]; then
     optimizer="galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
-<<<<<<< HEAD
     min_lr_ratio=0.1
 elif [ $idx -eq 2 ]; then
     optimizer="soft_adamw_neumann"
     lr=0.01
     soft_rank=2
     min_lr_ratio=0.01
-=======
-elif [ $idx -eq 2 ]; then
-    optimizer="soft_adamw_neumann"
-    lr=0.01
-    soft_rank=4
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
     # Set soft_lr and update_reset_R_gap based on soft_rank
     if [ $soft_rank -eq 4 ]; then
         soft_lr_values=(0.002)
@@ -70,28 +60,19 @@ elif [ $idx -eq 3 ]; then
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
-<<<<<<< HEAD
     min_lr_ratio=0.1
-=======
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
 elif [ $idx -eq 4 ]; then
     optimizer="only_galore_adamw"
     lr=0.01
     soft_lr_values=(0)
     soft_rank=0
     update_reset_R_gap=0
-<<<<<<< HEAD
     min_lr_ratio=0.1
-=======
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
 elif [ $idx -eq 5 ]; then
     optimizer="only_soft_adamw_neumann"
     lr=0.01
     soft_rank=4
-<<<<<<< HEAD
     min_lr_ratio=0.01
-=======
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
     # Set soft_lr and update_reset_R_gap based on soft_rank
     if [ $soft_rank -eq 4 ]; then
         soft_lr_values=(0.002)
@@ -118,11 +99,7 @@ for soft_lr in "${soft_lr_values[@]}"; do
     fi
 
     # LLaMA-130M, GaLore-Adam, 1 A100, 1 Node
-<<<<<<< HEAD
     torchrun --standalone --nproc_per_node 1 torchrun_main.py \
-=======
-    torchrun --standalone --nproc_per_node 2 torchrun_main.py \
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
         --wandb_project $wandb_project \
         --model_config configs/llama_130m.json \
         --lr $lr \
@@ -136,23 +113,13 @@ for soft_lr in "${soft_lr_values[@]}"; do
         --update_reset_R_gap $update_reset_R_gap \
         --batch_size 256 \
         --total_batch_size 512 \
-<<<<<<< HEAD
-        --num_training_steps 150000 \
+        --num_training_steps 100000 \
         --warmup_steps 0 \
         --min_lr_ratio $min_lr_ratio \
         --weight_decay 0.0 \
         --grad_clipping 0.05 \
         --dtype bfloat16 \
         --eval_every 2000 \
-=======
-        --num_training_steps 200000 \
-        --warmup_steps 0 \
-        --min_lr_ratio 0.1 \
-        --weight_decay 0.0 \
-        --grad_clipping 0.1 \
-        --dtype bfloat16 \
-        --eval_every 5000 \
->>>>>>> ac8f43ce53cb21ae524bcdda49fa2fc94e93db47
         --save_every 10000000 \
         --optimizer $optimizer \
         --reset_R \
