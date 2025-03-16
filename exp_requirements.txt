@@ -1,7 +1,7 @@
 # torch
 transformers==4.31.0
 tokenizers
-datasets
+datasets==3.3.0
 peft
 wandb
 loguru
@@ -12,3 +12,4 @@ bitsandbytes
 scipy
 scikit-learn
 evaluate
+nested_dict

@@ -24,7 +24,7 @@ elif [ $idx -eq 2 ]; then
     lr=0.001
 elif [ $idx -eq 3 ]; then
     optimizer="soft_adamw_neumann"
-    lr=0.001
+    lr=0.002
 fi
 
 echo "Optimizer: $optimizer"
@@ -35,11 +35,11 @@ torchrun --standalone --nproc_per_node 1 torchrun_main.py \
     --lr $lr \
     --galore_scale 0.25 \
     --rank 128 \
-    --soft_rank 4 \
+    --soft_rank 1 \
     --update_proj_gap 200 \
     --batch_size 512 \
     --total_batch_size 512 \
-    --num_training_steps 20000 \
+    --num_training_steps 10000 \
     --warmup_steps 1000 \
     --weight_decay 0.0 \
     --grad_clipping 0.0 \

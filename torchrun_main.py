@@ -425,7 +425,7 @@ def load_local_data(split='train', max_samples=None, seed=42):
         'url': Value('string')
     })
     
-    data_dir = "/lustre/fast/fast/zqiu/GaLore/c4/en"
+    data_dir = "./c4/en"
     import glob
     
     # Get all available files
@@ -455,7 +455,7 @@ def load_local_data(split='train', max_samples=None, seed=42):
                 data_files=file_path,
                 features=features,
                 streaming=False,
-                cache_dir=None,
+                cache_dir="/tmp/c4",
                 keep_in_memory=True,
                 num_proc=os.cpu_count()-1,  # Use multiple cores for loading
             )
@@ -632,7 +632,7 @@ def main(args):
             
     # initialize wandb without config (it is passed later)
     if global_rank == 0:
-        wandb.init(project="soft-c4-neumann-reset_R", name=args.save_dir.split('/')[-1])
+        wandb.init(project="soft-c4-neumann-reset_R-develop", name=args.save_dir.split('/')[-1])
         
     logger.info(f"Using dist with rank {global_rank} (only rank 0 will log)")
     logger.info("*" * 40)
@@ -832,7 +832,7 @@ def main(args):
         regular_params = [p for p in model.parameters() if id(p) not in id_soft_params]
         # Create parameter groups for optimizer
         param_groups = [
-            # {'params': regular_params, 'lr': 0.01},
+            {'params': regular_params, 'lr': 0.01},
             {'params': soft_params, 'lr': args.lr, 'soft_rank': args.soft_rank},
         ]
 
